@@ -33,8 +33,25 @@ static int hello_init(void){
 	}
 	
 static void hello_exit(void){
-	printk(KERN_ALERT "BYE");
-	}
+    unsigned long long timeRun = 0;
+    unsigned long timeRunS, timeRunM, timeRunH;
+
+    for_each_process(ts1){					//For all processes in the task list
+/*Still needs semphore creation to functionally destroy the semaphores*/
+        up(ts1);						//Set flag to up
+        timeRun += (ktime_get_ns() - ts1->start_time);		//Accumulate run time
+
+        kthread_stop(ts1);					//Stop that thread
+    }
+    timeRunS = (unsigned long) (timeRun % 100000000);		//ns to s
+    timeRunM = timeRunS % 60;					//s to min
+    timeRunH = timeRunM % 60;					//min to hour
+    
+    timeRunS = timeRunS - (timeRunM*60);			//Find seconds between minutes running
+    timeRunM = timeRunM - (timeRunH*60);			//Find minutes between hours running
+
+    printk(KERN_INFO "The total elapsed time of all processes for UID %s is %d : %d : %d\n", uuid, timeRunH, timeRunM, timeRunS);
+}
 	
 
 struct task_struct *kthread_run(int (*threadfn)(void *data), void *data, const char *namefmt)
@@ -43,7 +60,7 @@ static int kthread_func(void *arg){
 
 }
 
-ts1 = kthread_run(kthread_func, NULL, "thread-1);
+ts1 = kthread_run(kthread_func, NULL, "thread-1");
 
 
 module_init(hello_init);
