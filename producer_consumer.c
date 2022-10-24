@@ -117,16 +117,23 @@ static void hello_exit(void){
     unsigned long timeRun = 0;
     unsigned long timeRunS, timeRunM, timeRunH;
 	
-    for_each_process(ts1){					//For all processes in the task list
-		/*Still needs semphore creation to functionally destroy the semaphores*/
-        up(ts1);						//Set flag to up
-        timeRun += (ktime_get_ns() - ts1->start_time);		//Accumulate run time
+    up(&full);                                                  //All semaphores set to up
+    up(&empty);
+    up(&mutex);
 
+    sem_destroy(&full);						//Destroy all sempahores
+    sem_destroy(&empty);
+    sem_destroy(&mutex);
+	
+    for_each_process(ts1){					//For all processes in the task list
+        timeRun += (ktime_get_ns() - ts1->start_time);		//Accumulate run time
         kthread_stop(ts1);					//Stop that thread
     }
+
+	
     timeRunS = timeRun % 100000000;				//ns to s
     timeRunM = timeRunS % 60;					//s to min
-    timeRunH = timeRunM % 60;					//min to hour
+    timeRunH = timeRunM % 60;					//min to hr
     
     timeRunS = timeRunS - (timeRunM*60);			//Find seconds between minutes running
     timeRunM = timeRunM - (timeRunH*60);			//Find minutes between hours running
