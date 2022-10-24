@@ -18,13 +18,28 @@ module_param(prod, int, S_IRUSR | S_IWUSR);
 module_param(cons, int, S_IRUSR | S_IWUSR);
 module_param(uuid, int, S_IRUSR | S_IWUSR);
 
-// CONSTRUCT SEMAPHORES
+//delcare struct
+struct task_struct_list {
+	struct task_struct* task;
+	struct task_struct_list* next;
+};
+
+struct buffer {
+	int capacity;
+	struct task_struct_list* list;
+};
+
+// CONSTRUCT SEMAPHORES and varibles
+struct buffer *buf = NULL;
+u64 total_seconds;
+int consumed = 0;
 struct semaphore empty;	// Size: buffSize. All locks available when buffer is empty
 struct semaphore full;	// Size: buffSize. All locks available when buffer is full
 struct semaphore mutex;	// Size: 1. Lock is available when none are accessing buffer
 sema_init(&empty, buffSize);
 sema_init(&full, buffSize);
 sema_init(&mutex, 1);
+
 
 // Use up all locks on full
 while (down_trylock(&full));
@@ -80,30 +95,72 @@ int producer(task_struct* tasks, task_struct* buffer) {
 	return 0;
 }
 
+// CONSUMER AND PRODUCER FUNCTION
+static int consumer(void *arg) {
+	int consumedCount = 0;
+
+	//Start infinite loop until stop
+	while (!kthread_should_stop()) {
+		if (down_interruptible(&full))
+			break;
+		if (down_interruptible(&mutex))
+			break;
+
+
+		//Check to skip critical section
+		if (kthread_should_stop()) {
+			return 0;
+		}
+
+
+		if (buf != NULL && buf->list != NULL && buf->capacity > 0) {
+			//Critical section
+			struct task_struct_list *temp = buf->list;
+			buf->list = buf->list->next;
+			u64 time_elapsed = ktime_get_ns() - temp->task->start_time;
+			u64 elapsed_seconds = time_elapsed / 1000000000;
+			int minutes = elapsed_seconds / 60;
+			int hours = minutes / 60;
+			int remaining_seconds = elapsed_seconds % 60;
+			total_seconds = total_seconds + time_elapsed;
+			//minutes = elapsed_seconds % 60;
+
+			consumedCount++;
+			consumed++;
+			printk(KERN_INFO "[%s] Consumed Item#-%d on buffer index:0 PID:%d Elapsed Time- %d:%d:%d\n", current->comm, consumed, temp->task->pid, hours, minutes, remaining_seconds);
+			buf->capacity--;
+			up(&mutex);
+			up(&empty);
+		}
+	}
+
+	return 0;
+}
+
 /*
 * CODE EXAMPLES BELOW
 */
 
 // Set module parameters
-int buffSize;
-int prod;
-int cons;
-int uuid;
-module_param(buffSize, int, S_IRUSR | S_IWUSR);
-module_param(prod, int, S_IRUSR | S_IWUSR);
-module_param(cons, int, S_IRUSR | S_IWUSR);
-module_param(uuid, int, S_IRUSR | S_IWUSR);
+// int buffSize;
+// int prod;
+// int cons;
+// int uuid;
+// module_param(buffSize, int, S_IRUSR | S_IWUSR);
+// module_param(prod, int, S_IRUSR | S_IWUSR);
+// module_param(cons, int, S_IRUSR | S_IWUSR);
+// module_param(uuid, int, S_IRUSR | S_IWUSR);
 
-//int param_var;
-//module_param(param_var,int, S_IRUSR | S_IWUSR);
+// //int param_var;
+// //module_param(param_var,int, S_IRUSR | S_IWUSR);
 
-// Displays module parameter values
-void display(void){
-	printk(KERN_ALERT "buffsize: param = %d", buffSize);
-	printk(KERN_ALERT "prod: param = %d", prod);
-	printk(KERN_ALERT "cons: param = %d", cons);
-	printk(KERN_ALERT "uuid: param = %d", uuid);
-}
+// // Displays module parameter values
+// void display(void){
+// 	printk(KERN_ALERT "buffsize: param = %d", buffSize);
+// 	printk(KERN_ALERT "prod: param = %d", prod);
+// 	printk(KERN_ALERT "cons: param = %d", cons);
+// 	printk(KERN_ALERT "uuid: param = %d", uuid);
+// }
 	
 // Initializer: Says hello and displays 'module_param's
 static int hello_init(void){
@@ -175,10 +232,10 @@ for_each_process(p){
 }	
 
 // Semaphores
-struct semaphore empty;	// Size: bufSize. All locks available when buffer is empty
-struct semaphore full;	// Size: bufSize. All locks available when buffer is full
-struct semaphore mutex;	// Size: 1. Lock is available when none are accessing buffer
-sema_init(&mutex, 1);
+// struct semaphore empty;	// Size: bufSize. All locks available when buffer is empty
+// struct semaphore full;	// Size: bufSize. All locks available when buffer is full
+// struct semaphore mutex;	// Size: 1. Lock is available when none are accessing buffer
+// sema_init(&mutex, 1);
 
 /*
 * 
