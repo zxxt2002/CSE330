@@ -68,8 +68,16 @@ static int producer(void *arg) {
 				new = kmalloc(sizeof(struct task_struct_list), GFP_KERNEL);
 				new->task = ptr;
 				buf->list = new;
+
+				/*!!!
+				struct task_struct_list *newT;
+				newT = kmalloc(sizeof(struct task_struct_list), GFP_KERNEL);
+				newT->task = ptr;
+				buf->list = newT
+				!!!*/
+
 				buf->capacity++;
-				printk(KERN_INFO "[%s] Produced Item#-%d at buffer index:%d for PID:%d", current->comm, process_counter, buf->capacity, new->task->pid);
+				printk(KERN_INFO "[%s] Produced Item#-%d at buffer index:%d for PID:%d", current->comm, process_counter, buf->capacity, new->task->pid);	// !!! newT->task->pid !!! //
 			}
 			else {	// Tasks exist in buffer
 				// Find end of buffer task_struct_list
@@ -82,8 +90,16 @@ static int producer(void *arg) {
 				new = kmalloc(sizeof(struct task_struct_list), GFP_KERNEL);
 				new->task = ptr;
 				temp->next = new;
+
+				/*!!!
+				struct task_struct_list *newT;
+				newT = kmalloc(sizeof(struct task_struct_list), GFP_KERNEL);
+				newT->task = ptr;
+				temp->next = newT
+				!!!*/
+
 				buf->capacity++;
-				printk(KERN_INFO "[%s] Produced Item#-%d at buffer index:%d for PID:%d\n", current->comm, process_counter, buf->capacity, new->task->pid);
+				printk(KERN_INFO "[%s] Produced Item#-%d at buffer index:%d for PID:%d\n", current->comm, process_counter, buf->capacity, new->task->pid);	// !!! newT->task->pid !!! //
 			}
 
 			// Release locks
@@ -114,6 +130,10 @@ static int consumer(void *arg) {
 
 		//Check to skip critical section
 		if (kthread_should_stop()) {
+			/*!!!	Release locks that should be released anyways
+			up(&mutex)
+			up(&empty)
+			!!!*/
 			return 0;
 		}
 
@@ -138,9 +158,11 @@ static int consumer(void *arg) {
 			buf->capacity--;	// Consume task
 
 			// Release locks
-			up(&mutex);
+			up(&mutex);	// !!! //
 			up(&empty);
 		}
+
+		// !!! up(&mutex) !!! // move this statement here so that the mutex is guaranteed to be released (avoid deadlock)
 	}
 
 	return 0;	// Success
@@ -225,6 +247,7 @@ static void __exit procon_exit(void) {
 	// Free buffer memory
 	struct task_struct_list *temp = buf->list;
 	while (temp != NULL) {
+		// !!! up(&empty) !!! //
 		struct task_struct_list *tbr = temp;
 		temp = temp->next;
 		kfree(tbr);
@@ -236,6 +259,7 @@ static void __exit procon_exit(void) {
 	// Halt consumer threads
 	int i = cons;
 	struct task_struct_list *cThread = cThreads;
+	// !!! Why have up functions in this loop instead of dealing with the locks in the threads? !!! //
 	while (cThread != NULL) {
 		int j = i;
 		while (j >= 0) {
