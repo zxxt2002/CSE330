@@ -116,24 +116,24 @@ static int producer(void *arg) {
 
 			//Critical section		
 			if (buf->list == NULL) {
-				struct task_struct_list *new;
-				new = kmalloc(sizeof(struct task_struct_list), GFP_KERNEL);
-				new->task = ptr;
+				struct task_struct_list *newTask;
+				newTask = kmalloc(sizeof(struct task_struct_list), GFP_KERNEL);
+				newTask->task = ptr;
 				buf->list = new;
 				buf->capacity++;
-				printk(KERN_INFO "[%s] Produced Item#-%d at buffer index:%d for PID:%d", current->comm, process_counter, buf->capacity, new->task->pid);
+				printk(KERN_INFO "[%s] Produced Item#-%d at buffer index:%d for PID:%d", current->comm, process_counter, buf->capacity, newTask->task->pid);
 			}
 			else {
 				struct task_struct_list *temp = buf->list;
 				while (temp->next != NULL) {
 					temp = temp->next;
 				}
-				struct task_struct_list *new;
-				new = kmalloc(sizeof(struct task_struct_list), GFP_KERNEL);
-				new->task = ptr;
-				temp->next = new;
+				struct task_struct_list *newTask;
+				newTask = kmalloc(sizeof(struct task_struct_list), GFP_KERNEL);
+				newTask->task = ptr;
+				temp->next = newTask;
 				buf->capacity++;
-				printk(KERN_INFO "[%s] Produced Item#-%d at buffer index:%d for PID:%d\n", current->comm, process_counter, buf->capacity, new->task->pid);
+				printk(KERN_INFO "[%s] Produced Item#-%d at buffer index:%d for PID:%d\n", current->comm, process_counter, buf->capacity, newTask->task->pid);
 			}
 
 
