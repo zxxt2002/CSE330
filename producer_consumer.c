@@ -210,6 +210,9 @@ On Failure: Returns ERR_PTR(-ENOMEM)
 
 // Example code to create kernel thread:
 
+
+/*
+
 static int kthread_func(void *arg){
 	// Some code
 }
@@ -231,6 +234,8 @@ for_each_process(p){
 	++process_counter;
 }	
 
+*/
+
 // Semaphores
 // struct semaphore empty;	// Size: bufSize. All locks available when buffer is empty
 // struct semaphore full;	// Size: bufSize. All locks available when buffer is full
@@ -244,7 +249,7 @@ for_each_process(p){
 static inline vid sema_init(struct semaphore *sem, int val);	// Initializes semaphore using a value val
 void down_interruptible(struct semaphore *sem);					// Locks a semaphore
 void up(struct semaphore *sem);									// Releases a semaphore lock
-*/
+
 
 sema_init(&empty, 5);	// Initialize 'empty' to 5
 while(!kthread_should_stop())
@@ -261,5 +266,6 @@ while(!kthread_should_stop())
 
 	up(empty);	// Release lock from empty
 }
+*/
 	
 	
