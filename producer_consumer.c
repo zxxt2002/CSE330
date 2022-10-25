@@ -18,7 +18,7 @@ module_param(prod, int, S_IRUSR | S_IWUSR);
 module_param(cons, int, S_IRUSR | S_IWUSR);
 module_param(uuid, int, S_IRUSR | S_IWUSR);
 
-//delcare struct
+//Declare struct task list for storing all the processes
 struct task_struct_list {
 	struct task_struct* task;
 	struct task_struct_list* next;
@@ -29,7 +29,7 @@ struct buffer {
 	struct task_struct_list* list;
 };
 
-// CONSTRUCT SEMAPHORES and varibles
+// Construct the shared buffer, Semaphores, and Variables
 struct buffer *buf = NULL;
 u64 total_seconds;
 int consumed = 0;
