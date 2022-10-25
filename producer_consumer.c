@@ -68,34 +68,83 @@ Return values:
 	Successfully went through all tasks: 0
 	Failure to go through all tasks: 1
 */
-int producer(task_struct* tasks, task_struct* buffer) {
-	for_each_process(tasks) {
-		// Continue until thread stop point or item placed in buffer
-		while (!kthread_should_stop()) {
+// int producer(task_struct* tasks, task_struct* buffer) {
+// 	for_each_process(tasks) {
+// 		// Continue until thread stop point or item placed in buffer
+// 		while (!kthread_should_stop()) {
 
-			// Acquire buffer mutex lock (wait until acquired)
-			if (down_interruptible(&mutex)) {
+// 			// Acquire buffer mutex lock (wait until acquired)
+// 			if (down_interruptible(&mutex)) {
 
-				// Acquire lock from empty if available
-				if (down_trylock(&empty)) {
-					buffer[buffSize - empty.count] = *tasks;
+// 				// Acquire lock from empty if available
+// 				if (down_trylock(&empty)) {
+// 					buffer[buffSize - empty.count] = *tasks;
 
-					up(&full);	// Release 1 lock for an item in the buffer
-					up(&mutex);	// Release buffer mutex lock
-					break;
-				}
+// 					up(&full);	// Release 1 lock for an item in the buffer
+// 					up(&mutex);	// Release buffer mutex lock
+// 					break;
+// 				}
 
-				up(&mutex);	// Release buffer mutex lock
+// 				up(&mutex);	// Release buffer mutex lock
+// 			}
+// 		}
+		
+// 		if (kthread_should_stop()) return 1;
+// 	}
+
+// 	return 0;
+// }
+
+// CONSUMER AND PRODUCER FUNCTION
+static int producer(void *arg) {
+	struct task_struct *ptr;
+	int process_counter = 0;
+
+
+	//Adds processes into buffer
+	for_each_process(ptr) {
+		if (ptr->cred->uid.val == uid) {
+			process_counter++;
+		
+			if (down_interruptible(&empty))
+				break;
+			if (down_interruptible(&mutex))
+				break;	
+
+			//Critical section		
+			if (buf->list == NULL) {
+				struct task_struct_list *new;
+				new = kmalloc(sizeof(struct task_struct_list), GFP_KERNEL);
+				new->task = ptr;
+				buf->list = new;
+				buf->capacity++;
+				printk(KERN_INFO "[%s] Produced Item#-%d at buffer index:%d for PID:%d", current->comm, process_counter, buf->capacity, new->task->pid);
 			}
+			else {
+				struct task_struct_list *temp = buf->list;
+				while (temp->next != NULL) {
+					temp = temp->next;
+				}
+				struct task_struct_list *new;
+				new = kmalloc(sizeof(struct task_struct_list), GFP_KERNEL);
+				new->task = ptr;
+				temp->next = new;
+				buf->capacity++;
+				printk(KERN_INFO "[%s] Produced Item#-%d at buffer index:%d for PID:%d\n", current->comm, process_counter, buf->capacity, new->task->pid);
+			}
+
+
+			up(&mutex);
+			up(&full);
+
+		
 		}
 		
-		if (kthread_should_stop()) return 1;
 	}
 
 	return 0;
 }
 
-// CONSUMER AND PRODUCER FUNCTION
 static int consumer(void *arg) {
 	int consumedCount = 0;
 
@@ -163,40 +212,133 @@ static int consumer(void *arg) {
 // }
 	
 // Initializer: Says hello and displays 'module_param's
-static int hello_init(void){
-	// printk(KERN_ALERT "TEST: hello");	// Test initializer
-	display();
+// static int hello_init(void){
+// 	// printk(KERN_ALERT "TEST: hello");	// Test initializer
+// 	display();
+// 	return 0;
+// }
+static int __init init_func(void) {
+	int err;
+	
+	printk(KERN_INFO "Starting producer_consumer module\n");
+
+	//Initialize Semaphores
+	sema_init(&mutex, 1);
+	sema_init(&full, 0);
+	sema_init(&empty, buff_size);
+
+	buf = kmalloc(sizeof(struct buffer), GFP_KERNEL);
+
+	//Start the threads
+
+	if (p == 1) {
+		pThread = kthread_run(producer, NULL, "Producer-1");
+		pThreadPID = pThread->pid;
+		if (IS_ERR(pThread)) {
+			printk(KERN_INFO "ERROR: Cannot create producer thread\n");
+			err = PTR_ERR(pThread);
+			pThread = NULL;
+			return err;
+		}
+	}
+	
+	int i = 0;
+	while (i < c) {
+		struct task_struct_list *cThread = kmalloc(sizeof(struct task_struct_list), GFP_KERNEL);
+		cThread->task = kthread_run(consumer, NULL, "Consumer-%d", i);
+		if (IS_ERR(cThread->task)) {
+			printk(KERN_INFO "ERROR: Cannot create consumer thread\n");
+			err = PTR_ERR(cThread->task);
+			cThread->task = NULL;
+			return err;
+		}
+		cThread->next = cThreads;
+		cThreads = cThread;
+		
+
+		i++;
+	}
+
+	struct task_struct_list *cThr = cThreads;
+	while (cThr != NULL) {
+		//printk(KERN_INFO "consumer thread PID %d\n", cThr->task->pid);
+		cThr = cThr->next;
+	}
+
 	return 0;
 }
 
 // Destructor: Runs a list of tasks and accumulates the time for the list to run
-static void hello_exit(void){
-    unsigned long timeRun = 0;
-    unsigned long timeRunS, timeRunM, timeRunH;
-	
-    up(&full);                                                  //All semaphores set to up
-    up(&empty);
-    up(&mutex);
+static void __exit exit_func(void) {
 
-    sem_destroy(&full);						//Destroy all sempahores
-    sem_destroy(&empty);
-    sem_destroy(&mutex);
-	
-    for_each_process(ts1){					//For all processes in the task list
-        timeRun += (ktime_get_ns() - ts1->start_time);		//Accumulate run time
-        kthread_stop(ts1);					//Stop that thread
-    }
+	struct task_struct_list *temp = buf->list;
+	while (temp != NULL) {
+		struct task_struct_list *tbr = temp;
+		temp = temp->next;
+		kfree(tbr);
+	}
+	kfree(buf);
 
-	
-    timeRunS = timeRun % 100000000;				//ns to s
-    timeRunM = timeRunS % 60;					//s to min
-    timeRunH = timeRunM % 60;					//min to hr
-    
-    timeRunS = timeRunS - (timeRunM*60);			//Find seconds between minutes running
-    timeRunM = timeRunM - (timeRunH*60);			//Find minutes between hours running
+	printk(KERN_INFO "Stopping producer thread PID-%d\n", pThreadPID);
 
-    printk(KERN_INFO "The total elapsed time of all processes for UID %s is\t%d:%d:%d\n", uuid, timeRunH, timeRunM, timeRunS);
+	int i = c;
+	struct task_struct_list *cThread = cThreads;
+	while (cThread != NULL) {
+		int j = i;
+		while (j >= 0) {
+			up(&full);
+			up(&mutex);
+			up(&full);
+			up(&mutex);
+			j--;
+		}
+		printk(KERN_INFO "Stopping consumer thread PID-%d\n", cThread->task->pid);
+		up(&full);
+		up(&mutex);
+		kthread_stop(cThread->task);
+		up(&full);
+		up(&mutex);
+		cThread = cThread->next;
+		
+	}
+
+
+	total_seconds = total_seconds / 1000000000;
+	int minutes = total_seconds / 60;
+	int hours = minutes / 60;
+	int remain_seconds = total_seconds % 60;
+	minutes = minutes % 60;
+	printk(KERN_INFO "The total elapsed time of all processes for UID %d is %d:%d:%d\n", uid, hours, minutes, remain_seconds);
+
+	printk(KERN_INFO "Exiting producer_consumer module\n");
 }
+// static void hello_exit(void){
+//     unsigned long timeRun = 0;
+//     unsigned long timeRunS, timeRunM, timeRunH;
+	
+//     up(&full);                                                  //All semaphores set to up
+//     up(&empty);
+//     up(&mutex);
+
+//     sem_destroy(&full);						//Destroy all sempahores
+//     sem_destroy(&empty);
+//     sem_destroy(&mutex);
+	
+//     for_each_process(ts1){					//For all processes in the task list
+//         timeRun += (ktime_get_ns() - ts1->start_time);		//Accumulate run time
+//         kthread_stop(ts1);					//Stop that thread
+//     }
+
+	
+//     timeRunS = timeRun % 100000000;				//ns to s
+//     timeRunM = timeRunS % 60;					//s to min
+//     timeRunH = timeRunM % 60;					//min to hr
+    
+//     timeRunS = timeRunS - (timeRunM*60);			//Find seconds between minutes running
+//     timeRunM = timeRunM - (timeRunH*60);			//Find minutes between hours running
+
+//     printk(KERN_INFO "The total elapsed time of all processes for UID %s is\t%d:%d:%d\n", uuid, timeRunH, timeRunM, timeRunS);
+// }
 	
 /* 
 threadfn is the function to run in the thread; 
@@ -257,15 +399,16 @@ while(!kthread_should_stop())
 	/*
 		Acquires a lock from empty, and waits to acquire if lock is unavailable
 	*/
-	if(down_interruptible(&empty))
-	{
-		break;
-	}
+// 	if(down_interruptible(&empty))
+// 	{
+// 		break;
+// 	}
 
-	// Some code...
+// 	// Some code...
 
-	up(empty);	// Release lock from empty
+// 	up(empty);	// Release lock from empty
 }
 */
-	
+module_init(init_func);
+module_exit(exit_func);	
 	
