@@ -33,6 +33,9 @@ struct buffer {
 struct buffer *buf = NULL;
 u64 total_seconds;
 int consumed = 0;
+struct task_struct *pThread;
+int pThreadPID;
+struct task_struct_list *cThreads = NULL; 
 struct semaphore empty;	// Size: buffSize. All locks available when buffer is empty
 struct semaphore full;	// Size: buffSize. All locks available when buffer is full
 struct semaphore mutex;	// Size: 1. Lock is available when none are accessing buffer
@@ -42,7 +45,7 @@ sema_init(&mutex, 1);
 
 
 // Use up all locks on full
-while (down_trylock(&full));
+//while(down_trylock(&full));
 
 // PRODUCER FUNCTION
 
@@ -103,7 +106,7 @@ static int producer(void *arg) {
 
 	//Adds processes into buffer
 	for_each_process(ptr) {
-		if (ptr->cred->uid.val == uid) {
+		if (ptr->cred->uid.val == uuid) {
 			process_counter++;
 		
 			if (down_interruptible(&empty))
@@ -225,13 +228,13 @@ static int __init init_func(void) {
 	//Initialize Semaphores
 	sema_init(&mutex, 1);
 	sema_init(&full, 0);
-	sema_init(&empty, buff_size);
+	sema_init(&empty, buffSize);
 
 	buf = kmalloc(sizeof(struct buffer), GFP_KERNEL);
 
 	//Start the threads
 
-	if (p == 1) {
+	if (prod == 1) {
 		pThread = kthread_run(producer, NULL, "Producer-1");
 		pThreadPID = pThread->pid;
 		if (IS_ERR(pThread)) {
@@ -243,7 +246,7 @@ static int __init init_func(void) {
 	}
 	
 	int i = 0;
-	while (i < c) {
+	while (i < cons) {
 		struct task_struct_list *cThread = kmalloc(sizeof(struct task_struct_list), GFP_KERNEL);
 		cThread->task = kthread_run(consumer, NULL, "Consumer-%d", i);
 		if (IS_ERR(cThread->task)) {
@@ -281,7 +284,7 @@ static void __exit exit_func(void) {
 
 	printk(KERN_INFO "Stopping producer thread PID-%d\n", pThreadPID);
 
-	int i = c;
+	int i = cons;
 	struct task_struct_list *cThread = cThreads;
 	while (cThread != NULL) {
 		int j = i;
@@ -308,7 +311,7 @@ static void __exit exit_func(void) {
 	int hours = minutes / 60;
 	int remain_seconds = total_seconds % 60;
 	minutes = minutes % 60;
-	printk(KERN_INFO "The total elapsed time of all processes for UID %d is %d:%d:%d\n", uid, hours, minutes, remain_seconds);
+	printk(KERN_INFO "The total elapsed time of all processes for UID %d is %d:%d:%d\n", uuid, hours, minutes, remain_seconds);
 
 	printk(KERN_INFO "Exiting producer_consumer module\n");
 }
@@ -407,8 +410,8 @@ while(!kthread_should_stop())
 // 	// Some code...
 
 // 	up(empty);	// Release lock from empty
-}
-*/
+//}
+//*/
 module_init(init_func);
 module_exit(exit_func);	
 	
