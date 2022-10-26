@@ -153,7 +153,7 @@ static int consumer(void *arg) {
 			// increment amount consumed by this thread and all threads
 			consumedCount++;
 			consumed++;
-			printk(KERN_INFO "[%s] Consumed Item#-%d on buffer index:0 PID:%d Elapsed Time- %d:%d:%d\n", current->comm, consumed, temp->task->pid, hours, minutes, remaining_seconds);
+			printk(KERN_INFO "[%s] Consumed Item#-%d on buffer index:%d for PID:%d Elapsed Time- %d:%d:%d\n", current->comm, consumedCount, buf->capacity, temp->task->pid, hours, minutes, remaining_seconds);
 
 			buf->capacity--;	// Consume task
 
