@@ -14,7 +14,13 @@
  *
  **********************************************************************/
 
+/*
 
+Code modified from authors above by:
+
+Aaron Huggins,
+!!! Make sure to add your name here and to the MODULE_AUTHOR call. We can Remove the other names if needed !!!
+*/
 
 
 
@@ -35,93 +41,81 @@
 /* Stops the kernel from being reported as "tainted." */
 MODULE_LICENSE("GPL");
 /* Name the module's authors. */
-MODULE_AUTHOR("Parker Ottaway, Derek Allen, and Auston Hein");
+MODULE_AUTHOR("Parker Ottaway, Derek Allen, and Auston Hein. Modified by Aaron Huggins, ");
 
-/* Variable to hold the PID of the process we want to get the
-   information of. */
-int PID;
 
-/* Accept the process ID of a process running on the machine. */
-module_param(PID, int, S_IRUSR);
+int pid;							// Process ID
+module_param(pid, int, S_IRUSR);	// Gather process ID as parameter
 
-/* Function to be initially run when the module is added to the
-   kernel. */
-int memMod_init(void) {
-	struct task_struct* task;
-	struct vm_area_struct* vas;
-	int ii;
-	int	physicalMemCount = 0;
-	int swapCount = 0;
+#pragma region VariableDeclaration
 
-	int contiguousPhysical = 0;
-	int contiguousSwap = 0;
-	int contiguousInvalid = 0;
-	unsigned long beginAddressPhysical = 0;
-	unsigned long endAddressPhysical = 0;
-	unsigned long beginAddressSwap = 0;
-	unsigned long endAddressSwap = 0;
-	unsigned long beginAddressInvalid = 0;
-	unsigned long endAddressInvalid = 0;
+struct task_struct* task;			// The current task (or "process")
+struct vm_area_struct* vma;			// Memory Region
 
-	pgd_t* pgd;
-	p4d_t* p4d;
-	pud_t* pud;
-	pmd_t* pmd;
-	pte_t* ptep;
+int ii;
+int	physicalMemCount = 0;
+int swapCount = 0;
 
-	/* Find the process with matching PID. */
+int contiguousPhysical = 0;
+int contiguousSwap = 0;
+int contiguousInvalid = 0;
+
+unsigned long beginAddressPhysical = 0;
+unsigned long endAddressPhysical = 0;
+unsigned long beginAddressSwap = 0;
+unsigned long endAddressSwap = 0;
+unsigned long beginAddressInvalid = 0;
+unsigned long endAddressInvalid = 0;
+
+pgd_t* pgd;
+p4d_t* p4d;
+pud_t* pud;
+pmd_t* pmd;
+pte_t* ptep;
+
+#pragma endregion
+
+// Finds the appropriate proccess's task struct.
+int findTask() {
 	for_each_process(task) {
-		/* Look for the task with our given PID. */
-		if (task->pid == PID) {
-			/* We found the task, now we want to escape the for
-			   loop and begin traversing the 5-level page table. */
-			goto found;
-		}
+		if (task->pid == pid) return 1;
 	}
 
-	/* Return error since the task could not be found. */
-	return 1;
+	return 0;
+}
 
-	/* We found the task, now we traverse the five layers. */
-found:
-	/* Point to the first virtual memory area belonging to
-	   the task. */
-	vas = task->mm->mmap;
+// Loads a page's table information
+void loadDirs() {
+	pgd = pgd_offset(task->mm, ii);	// Get Global dir
+	p4d = p4d_offset(pgd, ii);		// Get 4th dir
+	pud = pud_offset(p4d, ii);		// Get Upper dir
+	pmd = pmd_offset(pud, ii);		// Get middle dir
+	ptep = pte_offset_map(pmd, ii);	// Get page table entry
+}
 
-	/* Iterate through all the task's virtual address spaces. */
-	while (vas) {
-		/* Go through all the contiguous pages belonging to
-		   the task's virtual memory area. */
-		for (ii = vas->vm_start; ii <= (vas->vm_end - PAGE_SIZE); ii += PAGE_SIZE) {
-			/* Get global directory. */
-			pgd = pgd_offset(task->mm, ii);
-			/* Get 4th directory. */
-			p4d = p4d_offset(pgd, ii);
-			/* Get upper directory. */
-			pud = pud_offset(p4d, ii);
-			/* Get middle directory. */
-			pmd = pmd_offset(pud, ii);
-			/* Get the page table entry. */
-			ptep = pte_offset_map(pmd, ii);
+// Main function. Initializes necessary values and runs the primary purpose of this program.
+int memMod_init(void) {
+	// Find correct task
+	int taskFound = findTask();
+	if (!taskFound) return -1;
 
-			/* Lock the page to read it. */
-			down_read(&task->mm->mmap_sem);
+	vma = task->mm->mmap;	// Access vm_area of task
+	while (vma) {			// Continues until vm_area is out of bounds
+		// Parse every page in vma
+		for (ii = vma->vm_start; ii <= (vma->vm_end - PAGE_SIZE); ii += PAGE_SIZE) {
+			loadDirs();						// Get page's table information
+			down_read(&task->mm->mmap_sem);	// Lock the page
 
-			/* Check for valid/invalid. */
-			if (!pte_none(*ptep)) {
+			// Check that the page table entry is valid (entry exists)
+			if (!pte_none(*ptep)) {	// Valid
 
 				/* Check if in memory or on disk. */
 				if (pte_present(*ptep)) { /* Page is in memory. */
 					physicalMemCount++;
-					/* If the physical memory chunk has not been found yet. */
-					if (contiguousPhysical != CONTIG_PAGES + 1) {
-						contiguousPhysical++;
-					}
 
-					/* Track first address. */
-					if (contiguousPhysical == 1) {
-						beginAddressPhysical = ii;
-					}
+					// Within bounds of process pages
+					if (contiguousPhysical != CONTIG_PAGES + 1) contiguousPhysical++;
+					if (contiguousPhysical == 1) beginAddressPhysical = ii;
 
 					/* If others are non-zero, set them to zero. */
 					if (contiguousSwap != CONTIG_PAGES + 1) {
@@ -142,7 +136,7 @@ found:
 					}
 				}
 				else { /* Page is swapped. */
-				 /* Increment counters. */
+					 /* Increment counters. */
 					swapCount++;
 					/* If the swap memory chunk has not been found yet. */
 					if (contiguousSwap != CONTIG_PAGES + 1) {
@@ -209,11 +203,12 @@ found:
 		}
 		/* Get the next virtual address space belonging to the
 		   task. */
-		vas = vas->vm_next;
+		vma = vma->vm_next;
 	}
 
 	/* Print the PID, number of pages in memory, and number of pages swapped. */
-	printk("PID: %d\tPRESENT: %d\tSWAPPED: %d", task->pid, physicalMemCount, swapCount);
+	int workingSetSize = 0;	// WSS for part 4. Not implemented yet.
+	printk("PID %d: RSS=%d KB,\tSWAP=%d KB, WSS=%d KB", task->pid, physicalMemCount, swapCount, workingSetSize);
 	printk("GOT HERE.");
 	return 0;
 }
