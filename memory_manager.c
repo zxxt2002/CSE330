@@ -99,6 +99,9 @@ int memMod_init(void) {
 	int taskFound = findTask();
 	if (!taskFound) return -1;
 
+	// Guarantee that page size is set before access
+	if (!PAGE_SIZE) PAGE_SIZE = sysconf(_SC_PAGESIZE);
+
 	vma = task->mm->mmap;	// Access vm_area of task
 	while (vma) {			// Continues until vm_area is out of bounds
 		// Parse every page in vma
@@ -130,23 +133,15 @@ int memMod_init(void) {
 					/* Save ending address. */
 					if (contiguousPhysical == CONTIG_PAGES) {
 						endAddressPhysical = ii;
-						printk("Starting Physical Address: %lu\tEnding Physical Address: %lu", beginAddressPhysical, endAddressPhysical);
-						/* Set contiguous counter to 101 so that it does not keep printing. */
-						contiguousPhysical++;
+						//printk("Starting Physical Address: %lu\tEnding Physical Address: %lu", beginAddressPhysical, endAddressPhysical);
+						
+						contiguousPhysical++;	// Sets to CONTIG_PAGES + 1 (Safe Out of Bounds)
 					}
 				}
 				else { /* Page is swapped. */
-					 /* Increment counters. */
 					swapCount++;
-					/* If the swap memory chunk has not been found yet. */
-					if (contiguousSwap != CONTIG_PAGES + 1) {
-						contiguousSwap++;
-					}
-
-					/* Track first address. */
-					if (contiguousSwap == 1) {
-						beginAddressSwap = ii;
-					}
+					if (contiguousSwap != CONTIG_PAGES + 1) contiguousSwap++;	// Increment while in bounds
+					if (contiguousSwap == 1) beginAddressSwap = ii;				// Track first address
 
 					/* If others are non-zero, set them to zero. */
 					if (contiguousPhysical != CONTIG_PAGES + 1) {
@@ -161,23 +156,15 @@ int memMod_init(void) {
 					/* Save ending address. */
 					if (contiguousSwap == CONTIG_PAGES) {
 						endAddressSwap = ii;
-						printk("Starting Swap Address: %lu\tEnding Swap Address: %lu", beginAddressSwap, endAddressSwap);
-						/* Set contiguous counter to 101 so that it does not keep printing. */
-						contiguousSwap++;
+						//printk("Starting Swap Address: %lu\tEnding Swap Address: %lu", beginAddressSwap, endAddressSwap);
+						
+						contiguousSwap++;	// Sets to CONTIG_PAGES + 1 (Safe Out of Bounds)
 					}
-
 				}
 			}
 			else { /* Page is invalid. */
-				 /* If the invalid memory chunk has not been found yet. */
-				if (contiguousInvalid != CONTIG_PAGES + 1) {
-					contiguousInvalid++;
-				}
-
-				/* Track first page. */
-				if (contiguousInvalid == 1) {
-					beginAddressInvalid = ii;
-				}
+				if (contiguousInvalid != CONTIG_PAGES + 1) contiguousInvalid++;		// Increment while in bounds
+				if (contiguousInvalid == 1) beginAddressInvalid = ii;				// Track first address
 
 				/* If others are non-zero, set them to zero. */
 				if (contiguousPhysical != CONTIG_PAGES + 1) {
@@ -198,8 +185,7 @@ int memMod_init(void) {
 				}
 			}
 
-			/* Unlock the page from read lock. */
-			up_read(&task->mm->mmap_sem);
+			up_read(&task->mm->mmap_sem);	// Release lock
 		}
 		/* Get the next virtual address space belonging to the
 		   task. */
@@ -209,7 +195,6 @@ int memMod_init(void) {
 	/* Print the PID, number of pages in memory, and number of pages swapped. */
 	int workingSetSize = 0;	// WSS for part 4. Not implemented yet.
 	printk("PID %d: RSS=%d KB,\tSWAP=%d KB, WSS=%d KB", task->pid, physicalMemCount, swapCount, workingSetSize);
-	printk("GOT HERE.");
 	return 0;
 }
 
