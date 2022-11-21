@@ -1,209 +1,178 @@
-/**********************************************************************
- * Authors: Parker Ottaway, Derek Allen, Auston Hein
- *
- * Description: This is a kernel module that takes in a
- * 				task, walks the page table and outputs
- * 				the starting and ending addresses of
- * 				100 contiguous pages of different kinds
- * 				of memory, including invalid pages,
- * 				pages swapped to the disk, and pages
- * 				present in memory.
- *
- * Purpose: To understand how data is stored and
- * 			accessed in a computer.
- *
- **********************************************************************/
-
-/*
-
-Code modified from authors above by:
-
-Aaron Huggins,
-!!! Make sure to add your name here and to the MODULE_AUTHOR call. We can Remove the other names if needed !!!
-*/
-
-
-
 #include <linux/init.h>
-#include <linux/sched.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/moduleparam.h>
 #include <linux/mm_types.h>
-#include <linux/types.h>
-#include <linux/sched/signal.h>
-#include <asm/pgtable.h>
-#include <asm/mmu_context.h>
+#include <linux/mm.h>
+#include <linux/hrtimer.h>
 
- /* Define the number of similar pages in a row. */
-#define CONTIG_PAGES 100
+//The process ID (stored in pid variable) is taken as the command-line input argument.
+static int pid = 0;
+module_param(pid, int, 0);
 
-/* Stops the kernel from being reported as "tainted." */
-MODULE_LICENSE("GPL");
-/* Name the module's authors. */
-MODULE_AUTHOR("Parker Ottaway, Derek Allen, and Auston Hein. Modified by Aaron Huggins, ");
+//Declaring variables
 
+struct task_struct *task;
+unsigned long address = 0;
+struct vm_area_struct *vma;
+pte_t *ptep_curr;
 
-int pid;							// Process ID
-module_param(pid, int, S_IRUSR);	// Gather process ID as parameter
+//Declaring variables to store the total number of pages that are present in the Resident Set Size (RSS), SWAP, Working Set Size (WSS) respectively. 
 
-#pragma region VariableDeclaration
+unsigned long RSS = 0;
+unsigned long SWAP = 0;
+unsigned long WSS = 0;
 
-struct task_struct* task;			// The current task (or "process")
-struct vm_area_struct* vma;			// Memory Region
+//This function walks through each valid process' page tables and checks if the page is present in the physical memory or in the swap. 
 
-int ii;
-int	physicalMemCount = 0;
-int swapCount = 0;
+static void walk_page_tables(struct mm_struct *mm, unsigned long address){
 
-int contiguousPhysical = 0;
-int contiguousSwap = 0;
-int contiguousInvalid = 0;
+	pgd_t *pgd;
+	p4d_t *p4d;
+	pte_t *ptep, pte;
+	pud_t *pud;
+	pmd_t *pmd;
+		
+	//Get pgd from mm and the page address
 
-unsigned long beginAddressPhysical = 0;
-unsigned long endAddressPhysical = 0;
-unsigned long beginAddressSwap = 0;
-unsigned long endAddressSwap = 0;
-unsigned long beginAddressInvalid = 0;
-unsigned long endAddressInvalid = 0;
-
-pgd_t* pgd;
-p4d_t* p4d;
-pud_t* pud;
-pmd_t* pmd;
-pte_t* ptep;
-
-#pragma endregion
-
-// Finds the appropriate proccess's task struct.
-int findTask() {
-	for_each_process(task) {
-		if (task->pid == pid) return 1;
+	pgd = pgd_offset(mm,address);
+	if (pgd_none(*pgd) || pgd_bad(*pgd)){
+		return;
 	}
-
-	return 0;
+	
+	//Get p4d from pgd and the page address
+	
+	p4d = p4d_offset(pgd,address);
+	if (p4d_none(*p4d) || p4d_bad(*p4d)) {
+		return;
+	}
+	//Get pud from p4d and the page address
+	
+	pud = pud_offset(p4d,address);
+	if (pud_none(*pud) || pud_bad(*pud)) {
+		return;
+	}
+	//Check if pmd is bad or does not exist
+	
+	pmd = pmd_offset(pud, address);
+	if (pmd_none(*pmd) || pmd_bad(*pmd)) {
+		return;
+	}
+	
+	// Get pte from pmd and the page address
+	
+	ptep = pte_offset_map(pmd,address);
+	if(!ptep) {
+		return;
+	}
+		
+	pte = *ptep;
+	ptep_curr = ptep;
+	
+	//Check if the current page is valid and whether or not it is present in the memory.
+	
+	int pte_is_present = pte_present(pte);
+	
+	//If the page is valid but is not present in the memory, then it is in the SWAP. Increment the counter variable.
+	
+	if (pte_is_present == 0)
+	{
+		SWAP++;
+	}
+	
+	//If the page is valid and present in the meory, then it is in the RSS. Increment the counter variable.
+	
+	else
+	{
+		RSS++;
+	}
 }
 
-// Loads a page's table information
-void loadDirs() {
-	pgd = pgd_offset(task->mm, ii);	// Get Global dir
-	p4d = p4d_offset(pgd, ii);		// Get 4th dir
-	pud = pud_offset(p4d, ii);		// Get Upper dir
-	pmd = pmd_offset(pud, ii);		// Get middle dir
-	ptep = pte_offset_map(pmd, ii);	// Get page table entry
+/* This is a helper function which tests and clears the accessed bit of a given PTE entry, it returns 1 if the pte was accessed and 0 if not acessed. 
+The number of pages acessed during an interval is later counted to help measure the working set size (WSS)*/
+
+int ptep_test_and_clear_young(struct vm_area_struct *vma, unsigned long addr, pte_t *ptep){
+	
+	int ret = 0;
+	if (pte_young(*ptep))
+		ret = test_and_clear_bit(_PAGE_BIT_ACCESSED, (unsigned long *) &ptep->pte);
+	return ret;
 }
 
-// Main function. Initializes necessary values and runs the primary purpose of this program.
-int memMod_init(void) {
-	// Find correct task
-	int taskFound = findTask();
-	if (!taskFound) return -1;
+/* This is a timer function which helps by having a periodic timer (every 10 seconds) to help measure a given process' Resident Set Size (RSS), SWAP size, and
+Working Set Size (WSS). For several minutes , these different memory usage changes are observed and the staistics related to that are printed.*/
 
-	// Guarantee that page size is set before access
-	if (!PAGE_SIZE) PAGE_SIZE = sysconf(_SC_PAGESIZE);
+unsigned long timer_interval_ns = 10e9; // The 10 second interval for timers.
+static struct hrtimer timer; //Initializng the timer.
 
-	vma = task->mm->mmap;	// Access vm_area of task
-	while (vma) {			// Continues until vm_area is out of bounds
-		// Parse every page in vma
-		for (ii = vma->vm_start; ii <= (vma->vm_end - PAGE_SIZE); ii += PAGE_SIZE) {
-			loadDirs();						// Get page's table information
-			down_read(&task->mm->mmap_sem);	// Lock the page
+//The timer function.
 
-			// Check that the page table entry is valid (entry exists)
-			if (!pte_none(*ptep)) {	// Valid
-
-				/* Check if in memory or on disk. */
-				if (pte_present(*ptep)) { /* Page is in memory. */
-					physicalMemCount++;
-
-					// Within bounds of process pages
-					if (contiguousPhysical != CONTIG_PAGES + 1) contiguousPhysical++;
-					if (contiguousPhysical == 1) beginAddressPhysical = ii;
-
-					/* If others are non-zero, set them to zero. */
-					if (contiguousSwap != CONTIG_PAGES + 1) {
-						contiguousSwap = 0;
-						beginAddressSwap = 0;
-					}
-					if (contiguousInvalid != CONTIG_PAGES + 1) {
-						contiguousInvalid = 0;
-						beginAddressInvalid = 0;
-					}
-
-					/* Save ending address. */
-					if (contiguousPhysical == CONTIG_PAGES) {
-						endAddressPhysical = ii;
-						//printk("Starting Physical Address: %lu\tEnding Physical Address: %lu", beginAddressPhysical, endAddressPhysical);
-						
-						contiguousPhysical++;	// Sets to CONTIG_PAGES + 1 (Safe Out of Bounds)
-					}
-				}
-				else { /* Page is swapped. */
-					swapCount++;
-					if (contiguousSwap != CONTIG_PAGES + 1) contiguousSwap++;	// Increment while in bounds
-					if (contiguousSwap == 1) beginAddressSwap = ii;				// Track first address
-
-					/* If others are non-zero, set them to zero. */
-					if (contiguousPhysical != CONTIG_PAGES + 1) {
-						contiguousPhysical = 0;
-						beginAddressPhysical = 0;
-					}
-					if (contiguousInvalid != CONTIG_PAGES + 1) {
-						contiguousInvalid = 0;
-						beginAddressInvalid = 0;
-					}
-
-					/* Save ending address. */
-					if (contiguousSwap == CONTIG_PAGES) {
-						endAddressSwap = ii;
-						//printk("Starting Swap Address: %lu\tEnding Swap Address: %lu", beginAddressSwap, endAddressSwap);
-						
-						contiguousSwap++;	// Sets to CONTIG_PAGES + 1 (Safe Out of Bounds)
-					}
-				}
-			}
-			else { /* Page is invalid. */
-				if (contiguousInvalid != CONTIG_PAGES + 1) contiguousInvalid++;		// Increment while in bounds
-				if (contiguousInvalid == 1) beginAddressInvalid = ii;				// Track first address
-
-				/* If others are non-zero, set them to zero. */
-				if (contiguousPhysical != CONTIG_PAGES + 1) {
-					contiguousPhysical = 0;
-					beginAddressPhysical = 0;
-				}
-				if (contiguousSwap != CONTIG_PAGES + 1) {
-					contiguousSwap = 0;
-					beginAddressSwap = 0;
-				}
-
-				/* Save ending address. */
-				if (contiguousInvalid == CONTIG_PAGES) {
-					endAddressInvalid = ii;
-					printk("Starting Invalid Address: %lu\tEnding Invalid Address: %lu", beginAddressInvalid, endAddressInvalid);
-					/* Set contiguous counter to 101 so that it does not keep printing. */
-					contiguousInvalid++;
-				}
-			}
-
-			up_read(&task->mm->mmap_sem);	// Release lock
+enum hrtimer_restart no_restart_callback(struct hrtimer *timer){
+	
+	ktime_t currtime, interval;
+	currtime = ktime_get();
+	interval = ktime_set(0, timer_interval_ns);
+	hrtimer_forward(timer, currtime, interval);
+	
+	//Calculate the Working Set Size (WSS) for the process.
+	
+	WSS = 0; //Reset the WSS for each new process.	
+	
+	vma = task->mm->mmap;
+	while(vma != NULL){
+		for (address = vma->vm_start; address < vma->vm_end; address += PAGE_SIZE){
+		
+			walk_page_tables(task->mm, address);
+			if (ptep_test_and_clear_young(vma, address, ptep_curr) == 1)
+				WSS++;	
 		}
-		/* Get the next virtual address space belonging to the
-		   task. */
 		vma = vma->vm_next;
 	}
+	
+	// Convert all the sizes to KiloBytes.
+	
+	RSS = (RSS * PAGE_SIZE) / 1024;
+	SWAP = (SWAP * PAGE_SIZE) / 1024;
+	WSS = (WSS * PAGE_SIZE) / 1024;
+	
+	//Print out the statistics.
+	
+	printk(KERN_INFO "PID [%d]: RSS=%lu KB, SWAP=%lu KB, WSS=%lu KB\n", pid, RSS, SWAP, WSS);
+	
+	// Reset the counters to 0 for future processes that are going to be traversed.
+	
+	RSS = 0;
+	SWAP = 0;
+	
+	return HRTIMER_RESTART;
+}
 
-	/* Print the PID, number of pages in memory, and number of pages swapped. */
-	int workingSetSize = 0;	// WSS for part 4. Not implemented yet.
-	printk("PID %d: RSS=%d KB,\tSWAP=%d KB, WSS=%d KB", task->pid, physicalMemCount, swapCount, workingSetSize);
+//Initializing module that detects the process and starts the timer.
+static int __init init_module(void){
+	
+	ktime_t currtime = ktime_add(ktime_get(), ktime_set(0,10e9));
+	struct task_struct *currtask;
+	
+	for_each_process(currtask){
+	
+		if (currtask->pid == pid){
+		
+			task = currtask;
+			hrtimer_init(&timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
+			timer.function = &no_restart_callback;
+			hrtimer_start(&timer, currtime, HRTIMER_MODE_ABS);
+			}
+	}
 	return 0;
 }
 
-/* Module function that is run when the module is removed from the
-   kernel. This will mainly do cleanup. */
-void memMod_exit(void) {
+//The exiting module, cancels the timer, and exits the program.
 
+static void __exit exit_module(void){
+	hrtimer_cancel(&timer);
 }
+//The initializing and exiting modules are alloted to functions.
 
-/* Define the init and exit functions for this kernel module. */
-module_init(memMod_init);
-module_exit(memMod_exit);
+module_init(init_module);
+module_exit(exit_module);
+MODULE_LICENSE("GPL");
