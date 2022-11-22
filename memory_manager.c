@@ -69,6 +69,8 @@ static void walk_page_tables(struct mm_struct *mm, unsigned long address){
 	if(!ptep) {
 		return; //Check if pte does not exist
 	}
+	
+	//Update the pointers since we have reached the page table entry.
 		
 	pte = *ptep;
 	curr_pte = ptep;
@@ -109,8 +111,6 @@ enum hrtimer_restart no_restart_callback(struct hrtimer *timer){
 	
 	/*Calculate the Working Set Size (WSS) for the process. To measure the WSS, during the 10 second interval, the number of pages accessed during that period will be counted by checking the bit of every table entry.*/
 	
-	wss_count = 0; //Reset the WSS for each new process.	
-	
 	vma = task->mm->mmap; //Get the memory region for the current process.
 
 	while(vma != NULL){
@@ -125,7 +125,7 @@ enum hrtimer_restart no_restart_callback(struct hrtimer *timer){
 			/*It is checked if the current page table entry has been accessed or not using the "ptep_test_and_clear_young" function. */
 			
 			if (ptep_test_and_clear_young(vma, page_address, curr_pte) == 1)
-			/*If the given pte was proven to be accessed, the acessed bit has already been cleared, and the count of WSS can be increased. */
+			/*If the given pte was proven to be accessed, the acessed bit has already been cleared, and the count of pages in WSS can be increased. */
 			{
 				wss_count++;	
 			}
@@ -150,6 +150,7 @@ enum hrtimer_restart no_restart_callback(struct hrtimer *timer){
 	
 	rss_count = 0;
 	swap_count = 0;
+	wss_count = 0;
 	
 	return HRTIMER_RESTART; //Invoke the HRT periodically.
 }
@@ -161,7 +162,6 @@ static int __init initialize_program(void){
 	//Pointer for traversing through the processes.
 	
 	struct task_struct *currtask;
-	
 	for_each_process(currtask){
 		if (currtask->pid == pid && currtask != NULL){
 			task = currtask;
@@ -170,9 +170,11 @@ static int __init initialize_program(void){
 			
 			hrtimer_init(&timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
 			
+			//Restart call back for the timer, the timer's function will be the one defined before.
+			
 			timer.function = &no_restart_callback;
 			
-			//Start the timer.
+			//Start the timer with a 10 second interval.
 			
 			hrtimer_start(&timer, (ktime_add(ktime_get(), ktime_set(0,10e9))), HRTIMER_MODE_ABS);
 			}
