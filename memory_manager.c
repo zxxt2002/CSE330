@@ -88,20 +88,6 @@ static void walk_page_tables(struct mm_struct *mm, unsigned long address){
 	}
 }
 
-/* This is a helper function which tests and clears the accessed bit of a given PTE entry, it returns 1 if the pte was accessed and 0 if not acessed. 
-The number of pages acessed during an interval is later counted to help measure the working set size (WSS)*/
-
-/*
-int ptep_test_and_clear_young(struct vm_area_struct *vma, unsigned long addr, pte_t *ptep){
-	
-	int ret = 0;
-	if (pte_young(*ptep))
-		ret = test_and_clear_bit(_PAGE_BIT_ACCESSED, (unsigned long *) &ptep->pte);
-	return ret;
-}
-*/
-
-
 /* This is a timer function which helps by having a periodic timer (every 10 seconds) to help measure a given process' Resident Set Size (RSS), SWAP size, and
 Working Set Size (WSS). For several minutes , these different memory usage changes are observed and the staistics related to that are printed.*/
 
