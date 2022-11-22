@@ -137,7 +137,8 @@ enum hrtimer_restart no_restart_callback(struct hrtimer *timer){
 }
 
 //Initializing module that detects the process and starts the timer.
-static int __init init_module(void){
+//static
+int __init init_module(void){
 	
 	ktime_t currtime = ktime_add(ktime_get(), ktime_set(0,10e9));
 	struct task_struct *currtask;
