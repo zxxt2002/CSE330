@@ -100,6 +100,17 @@ struct vm_area_struct *vma; //Used to traverse the memory regions.
 unsigned long timer_interval_ns = 10e9; // The 10 second interval for timers.
 static struct hrtimer timer; //Initializng the timer.
 
+// This function checks if the page
+
+int ptep_test_and_clear_young(struct vm_area_struct *vma, unsigned long addr, pte_t *ptep){
+	
+	int ret = 0;
+	if (pte_young(*ptep))
+		ret = test_and_clear_bit(_PAGE_BIT_ACCESSED, (unsigned long *) &ptep->pte);
+	return ret;
+}
+
+
 //The 10 second interval timer function where the page tables are walked through and the calculations are carried out.
 
 enum hrtimer_restart no_restart_callback(struct hrtimer *timer){
