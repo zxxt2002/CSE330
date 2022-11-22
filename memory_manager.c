@@ -71,11 +71,11 @@ static void walk_page_tables(struct mm_struct *mm, unsigned long address){
 	}
 	
 	//Update the pointers since we have reached the page table entry.
-		
-	pte = *ptep;
 	curr_pte = ptep;
 	
-	//Check If the page is valid and present in the memory, then it is part of the process's RSS. Increment the RSS counter variable.
+	//Check If the page table entry is valid and present in the memory, then it is part of the process's RSS. Increment the RSS counter variable.
+	
+	pte = *ptep;
 	
 	if ((pte_present(pte)) == 1)
 	{
